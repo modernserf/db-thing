@@ -78,3 +78,44 @@ test('build a database with tables', (t) => {
     t.deepEquals(names, ['Abel', 'Cain'])
     t.end()
 })
+
+test('rules', (t) => {
+    const male = (n) => [n, 'male']
+    const female = (n) => [n, 'female']
+    const parent = (child, parent) => [parent, 'parent-of', child]
+    const father = (child, parent) => [parent, 'father-of', child]
+
+    const db = [
+        male('james1'),
+        male('charles1'),
+        male('charles2'),
+        male('james2'),
+        male('george1'),
+
+        female('catherine'),
+        female('elizabeth'),
+        female('sophia'),
+
+        parent('charles1', 'james1'),
+        parent('elizabeth', 'james1'),
+        parent('charles2', 'charles1'),
+        parent('catherine', 'charles1'),
+        parent('james2', 'charles1'),
+        parent('sophia', 'elizabeth'),
+        parent('george1', 'sophia'),
+
+        (Child, Father) => [
+            father(Child, Father), // :-
+            male(Father),
+            parent(Child, Father)
+        ]
+    ]
+
+    const res = query(db, (Child) => [
+        father(Child, 'charles1')
+    ])
+
+    const names = [...res].map(([name]) => name).sort()
+    t.deepEquals(names, ['catherine', 'charles2', 'james2'])
+    t.end()
+})

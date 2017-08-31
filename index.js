@@ -1,6 +1,5 @@
 function * query (db, fn) {
-    const vars = Array(fn.length).fill(0).map((_, i) => Symbol(`var ${i}`))
-    const where = fn(...vars)
+    const { vars, where } = runClause(fn)
     const bindings = {}
     yield * innerQuery(bindings, db, vars, where)
 }
@@ -8,39 +7,72 @@ function * query (db, fn) {
 function * innerQuery (bindings, db, vars, where) {
     const [w, ...rest] = where
     for (const rule of db) {
-        const nextBindings = getBindings(bindings, rule, w, vars)
-        if (nextBindings) {
+        const iter = Array.isArray(rule)
+            ? getFactBindings(bindings, rule, w)
+            : getRuleBindings(bindings, rule, w, db)
+
+        for (const nextBindings of iter) {
             if (rest.length) {
                 // more rules to match
                 yield * innerQuery(nextBindings, db, vars, rest)
             } else {
                 // finished matching
-                yield vars.map((v) => nextBindings[v])
+                yield vars.map((v) => lookup(nextBindings, v))
             }
         }
     }
 }
 
-function getBindings (initBindings, rule, w, vars) {
-    const bindings = Object.assign({}, initBindings)
+function runClause (fn) {
+    const vars = Array(fn.length).fill(0).map((_, i) => Symbol(`var ${i}`))
+    const where = fn(...vars)
+    return { vars, where }
+}
+
+function * getRuleBindings (initBindings, rule, w, db) {
+    const { where: [clauseRule, ...clauseConditions], vars: clauseVars } = runClause(rule)
+    let bindings = initBindings
+    // if rule matches where pattern
     for (let i = 0; i < w.length; i++) {
-        const whereVal = w[i]
-        const ruleVal = rule[i]
-        if (vars.includes(whereVal)) {
-            // is binding
-            if (bindings[whereVal] && bindings[whereVal] !== ruleVal) {
-                // has existing value & doesnt match
-                return null
-            } else {
-                // set initial value
-                bindings[whereVal] = ruleVal
-            }
-        } else if (whereVal !== ruleVal) {
-            // is literal, doesn't match
-            return null
-        }
+        bindings = unify(bindings, w[i], clauseRule[i])
+        if (!bindings) { return }
     }
-    return bindings
+    for (const res of innerQuery(bindings, db, clauseVars, clauseConditions)) {
+        const fact = rule(...res)[0]
+        const nextBindings = [...getFactBindings(bindings, fact, w)][0]
+        if (nextBindings) { yield nextBindings }
+    }
+}
+
+function sym (v) { return typeof v === 'symbol' }
+function set (l, k, v) { return Object.assign({}, l, {[k]: v}) }
+
+// recursively trace bindings
+function lookup (bindings, v) {
+    if (!bindings[v]) { return v }
+    return lookup(bindings, bindings[v])
+}
+
+function unify (bindings, lhs, rhs) {
+    lhs = lookup(bindings, lhs)
+    rhs = lookup(bindings, rhs)
+
+    // literal equality
+    if (lhs === rhs) { return bindings }
+    // new binding
+    if (sym(lhs)) { return set(bindings, lhs, rhs) }
+    if (sym(rhs)) { return set(bindings, rhs, lhs) }
+    // mismatch
+    return null
+}
+
+function * getFactBindings (initBindings, fact, where) {
+    let bindings = initBindings
+    for (let i = 0; i < where.length; i++) {
+        bindings = unify(bindings, where[i], fact[i])
+        if (!bindings) { return }
+    }
+    yield bindings
 }
 
 function createDatabase (tables) {
