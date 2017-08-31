@@ -1,5 +1,5 @@
 const test = require('tape')
-const { query, createDatabase } = require('./index')
+const { query, createDatabase, r } = require('./index')
 
 test('find a single match', (t) => {
     const db = [
@@ -80,39 +80,34 @@ test('build a database with tables', (t) => {
 })
 
 test('rules', (t) => {
-    const male = (n) => [n, 'male']
-    const female = (n) => [n, 'female']
-    const parent = (child, parent) => [parent, 'parent-of', child]
-    const father = (child, parent) => [parent, 'father-of', child]
-
     const db = [
-        male('james1'),
-        male('charles1'),
-        male('charles2'),
-        male('james2'),
-        male('george1'),
+        r.male('james1'),
+        r.male('charles1'),
+        r.male('charles2'),
+        r.male('james2'),
+        r.male('george1'),
 
-        female('catherine'),
-        female('elizabeth'),
-        female('sophia'),
+        r.female('catherine'),
+        r.female('elizabeth'),
+        r.female('sophia'),
 
-        parent('charles1', 'james1'),
-        parent('elizabeth', 'james1'),
-        parent('charles2', 'charles1'),
-        parent('catherine', 'charles1'),
-        parent('james2', 'charles1'),
-        parent('sophia', 'elizabeth'),
-        parent('george1', 'sophia'),
+        r.parent('charles1', 'james1'),
+        r.parent('elizabeth', 'james1'),
+        r.parent('charles2', 'charles1'),
+        r.parent('catherine', 'charles1'),
+        r.parent('james2', 'charles1'),
+        r.parent('sophia', 'elizabeth'),
+        r.parent('george1', 'sophia'),
 
         ({ Child, Father }) => [
-            father(Child, Father), // :-
-            male(Father),
-            parent(Child, Father)
+            r.father(Child, Father), // :-
+            r.male(Father),
+            r.parent(Child, Father)
         ]
     ]
 
     const res = query(db, ({ name }) => [
-        father(name, 'charles1')
+        r.father(name, 'charles1')
     ])
 
     const names = [...res].map((p) => p.name).sort()
