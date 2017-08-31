@@ -8,11 +8,11 @@ test('find a single match', (t) => {
         [3, 'name', 'Carol']
     ]
 
-    const res = query(db, (id) => [
+    const res = query(db, ({ id }) => [
         [id, 'name', 'Alice']
     ])
 
-    const [[id]] = [...res]
+    const [{id}] = [...res]
     t.equals(id, 1)
     t.end()
 })
@@ -26,11 +26,11 @@ test('find multiple results', (t) => {
         [1, 'father-of', 3]
     ]
 
-    const res = query(db, (childID) => [
+    const res = query(db, ({ childID }) => [
         [1, 'father-of', childID]
     ])
 
-    const ids = [...res].map(([id]) => id).sort()
+    const ids = [...res].map((p) => p.childID).sort()
     t.deepEquals(ids, [2, 3])
     t.end()
 })
@@ -44,13 +44,13 @@ test('find relationships', (t) => {
         [1, 'father-of', 3]
     ]
 
-    const res = query(db, (parentID, childID, name) => [
+    const res = query(db, ({ parentID, childID, name }) => [
         [parentID, 'name', 'Adam'],
         [childID, 'name', name],
         [parentID, 'father-of', childID]
     ])
 
-    const names = [...res].map(([_, __, name]) => name).sort()
+    const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['Abel', 'Cain'])
     t.end()
 })
@@ -68,13 +68,13 @@ test('build a database with tables', (t) => {
         ]
     })
 
-    const res = query(db, (parentID, childID, name) => [
+    const res = query(db, ({parentID, childID, name}) => [
         [parentID, 'person/name', 'Adam'],
         [childID, 'person/name', name],
         [parentID, 'parentChild/childID', childID]
     ])
 
-    const names = [...res].map(([_, __, name]) => name).sort()
+    const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['Abel', 'Cain'])
     t.end()
 })
@@ -104,18 +104,18 @@ test('rules', (t) => {
         parent('sophia', 'elizabeth'),
         parent('george1', 'sophia'),
 
-        (Child, Father) => [
+        ({ Child, Father }) => [
             father(Child, Father), // :-
             male(Father),
             parent(Child, Father)
         ]
     ]
 
-    const res = query(db, (Child) => [
-        father(Child, 'charles1')
+    const res = query(db, ({ name }) => [
+        father(name, 'charles1')
     ])
 
-    const names = [...res].map(([name]) => name).sort()
+    const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['catherine', 'charles2', 'james2'])
     t.end()
 })

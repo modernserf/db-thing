@@ -17,16 +17,29 @@ function * innerQuery (bindings, db, vars, where) {
                 yield * innerQuery(nextBindings, db, vars, rest)
             } else {
                 // finished matching
-                yield vars.map((v) => lookup(nextBindings, v))
+                yield mapVars(vars, nextBindings)
             }
         }
     }
 }
 
 function runClause (fn) {
-    const vars = Array(fn.length).fill(0).map((_, i) => Symbol(`var ${i}`))
-    const where = fn(...vars)
+    const vars = new Proxy({}, {
+        get: (target, name) => {
+            if (!target[name]) { target[name] = Symbol(name) }
+            return target[name]
+        }
+    })
+
+    const where = fn(vars)
     return { vars, where }
+}
+
+function mapVars (vars, bindings) {
+    return Object.keys(vars).reduce((m, k) => {
+        m[k] = lookup(bindings, vars[k])
+        return m
+    }, {})
 }
 
 function * getRuleBindings (initBindings, rule, w, db) {
@@ -38,7 +51,7 @@ function * getRuleBindings (initBindings, rule, w, db) {
         if (!bindings) { return }
     }
     for (const res of innerQuery(bindings, db, clauseVars, clauseConditions)) {
-        const fact = rule(...res)[0]
+        const fact = rule(res)[0]
         const nextBindings = [...getFactBindings(bindings, fact, w)][0]
         if (nextBindings) { yield nextBindings }
     }
