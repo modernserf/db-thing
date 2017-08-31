@@ -43,6 +43,23 @@ function getBindings (initBindings, rule, w, vars) {
     return bindings
 }
 
+function createDatabase (tables) {
+    const rules = []
+    for (const tableName in tables) {
+        const table = tables[tableName]
+        for (const row of table) {
+            const id = row.id
+            if (!id) { throw new Error('Row must have `id` field') }
+            for (const key in row) {
+                if (key === 'id') { continue }
+                rules.push([id, `${tableName}/${key}`, row[key]])
+            }
+        }
+    }
+    return rules
+}
+
 module.exports = {
-    query
+    query,
+    createDatabase
 }

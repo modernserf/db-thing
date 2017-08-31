@@ -1,5 +1,5 @@
 const test = require('tape')
-const { query } = require('./index')
+const { query, createDatabase } = require('./index')
 
 test('find a single match', (t) => {
     const db = [
@@ -47,7 +47,31 @@ test('find relationships', (t) => {
     const res = query(db, (parentID, childID, name) => [
         [parentID, 'name', 'Adam'],
         [childID, 'name', name],
-        [1, 'father-of', childID]
+        [parentID, 'father-of', childID]
+    ])
+
+    const names = [...res].map(([_, __, name]) => name).sort()
+    t.deepEquals(names, ['Abel', 'Cain'])
+    t.end()
+})
+
+test('build a database with tables', (t) => {
+    const db = createDatabase({
+        person: [
+            { id: 1, name: 'Adam' },
+            { id: 2, name: 'Cain' },
+            { id: 3, name: 'Abel' }
+        ],
+        parentChild: [
+            { id: 1, childID: 2 },
+            { id: 1, childID: 3 }
+        ]
+    })
+
+    const res = query(db, (parentID, childID, name) => [
+        [parentID, 'person/name', 'Adam'],
+        [childID, 'person/name', name],
+        [parentID, 'parentChild/childID', childID]
     ])
 
     const names = [...res].map(([_, __, name]) => name).sort()
