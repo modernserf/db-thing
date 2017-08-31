@@ -104,6 +104,10 @@ function createDatabase (tables) {
     return rules
 }
 
+function pull () {
+    // TODO
+}
+
 const r = new Proxy({}, {
     get: (_, name) => (id, ...params) => [id, name, ...params]
 })
@@ -111,5 +115,6 @@ const r = new Proxy({}, {
 module.exports = {
     query,
     createDatabase,
-    r
+    r,
+    pull
 }
