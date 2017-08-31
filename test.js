@@ -114,3 +114,43 @@ test('rules', (t) => {
     t.deepEquals(names, ['catherine', 'charles2', 'james2'])
     t.end()
 })
+
+test('recursion', (t) => {
+    const db = [
+        r.male('james1'),
+        r.male('charles1'),
+        r.male('charles2'),
+        r.male('james2'),
+        r.male('george1'),
+
+        r.female('catherine'),
+        r.female('elizabeth'),
+        r.female('sophia'),
+
+        r.parent('charles1', 'james1'),
+        r.parent('elizabeth', 'james1'),
+        r.parent('charles2', 'charles1'),
+        r.parent('catherine', 'charles1'),
+        r.parent('james2', 'charles1'),
+        r.parent('sophia', 'elizabeth'),
+        r.parent('george1', 'sophia'),
+
+        ({ Child, Parent }) => [
+            r.ancestor(Child, Parent),
+            r.parent(Child, Parent)
+        ],
+        ({ Child, Parent, Ancestor }) => [
+            r.ancestor(Child, Ancestor),
+            r.parent(Parent, Ancestor),
+            r.ancestor(Child, Parent)
+        ]
+    ]
+
+    const res = query(db, ({ name }) => [
+        r.ancestor('charles2', name)
+    ])
+
+    const names = [...res].map((p) => p.name).sort()
+    t.deepEquals(names, ['charles1', 'james1'])
+    t.end()
+})
