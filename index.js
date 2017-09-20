@@ -5,7 +5,11 @@ function * query (db, rule) {
 }
 
 function * innerQuery (db, bindings, zzz) {
-    for (const rule of db) {
+    const matchingRules = db.filter((r) =>
+        typeof r === 'function' || // all rules
+        r[1] === zzz.head[1]) // fact with same name as the term
+
+    for (const rule of matchingRules) {
         for (const nextBindings of getRuleBindings(db, bindings, zzz, rule)) {
             if (zzz.tail.length) {
                 // more rules to match
@@ -47,22 +51,22 @@ function mapVars (zzz, bindings) {
     }, {})
 }
 
-function * getRuleBindings (db, initBindings, w, rule) {
-    const zzz = parseRule(rule)
+function * getRuleBindings (db, initBindings, zzz, rule) {
+    const parsedRule = parseRule(rule)
     let bindings = initBindings
     // if rule matches where pattern
-    for (let i = 0; i < w.head.length; i++) {
-        bindings = unify(bindings, w.head[i], zzz.head[i])
+    for (let i = 0; i < zzz.head.length; i++) {
+        bindings = unify(bindings, zzz.head[i], parsedRule.head[i])
         if (!bindings) { return }
     }
     // simple fact
-    if (!zzz.tail.length) {
+    if (!parsedRule.tail.length) {
         yield bindings
         return
     }
 
-    for (const res of innerQuery(db, bindings, nextZZZ(zzz))) {
-        yield * getRuleBindings(db, bindings, w, zzz.popHead(res))
+    for (const res of innerQuery(db, bindings, nextZZZ(parsedRule))) {
+        yield * getRuleBindings(db, bindings, zzz, parsedRule.popHead(res))
     }
 }
 
