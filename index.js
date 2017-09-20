@@ -1,29 +1,34 @@
-function * query (db, fn) {
-    const { vars, where } = runClause(fn)
+function * query (db, rule) {
+    const zzz = parseRule(rule)
     const bindings = {}
-    yield * innerQuery(bindings, db, vars, where)
+    yield * innerQuery(db, bindings, zzz)
 }
 
-function * innerQuery (bindings, db, vars, where) {
-    const [w, ...rest] = where
+function * innerQuery (db, bindings, zzz) {
     for (const rule of db) {
-        const iter = Array.isArray(rule)
-            ? getFactBindings(bindings, rule, w)
-            : getRuleBindings(bindings, rule, w, db)
-
-        for (const nextBindings of iter) {
-            if (rest.length) {
+        for (const nextBindings of getRuleBindings(db, bindings, zzz, rule)) {
+            if (zzz.tail.length) {
                 // more rules to match
-                yield * innerQuery(nextBindings, db, vars, rest)
+                yield * innerQuery(db, nextBindings, nextZZZ(zzz))
             } else {
                 // finished matching
-                yield mapVars(vars, nextBindings)
+                yield mapVars(zzz, nextBindings)
             }
         }
     }
 }
 
-function runClause (fn) {
+function nextZZZ (zzz) {
+    return Object.assign({}, zzz, { head: zzz.tail[0], tail: zzz.tail.slice(1) })
+}
+
+function parseRule (rule) {
+    // simple fact
+    if (Array.isArray(rule)) {
+        return { head: rule, tail: [] }
+    }
+
+    // complex clause
     const vars = new Proxy({}, {
         get: (target, name) => {
             if (!target[name]) { target[name] = Symbol(name) }
@@ -31,29 +36,33 @@ function runClause (fn) {
         }
     })
 
-    const where = fn(vars)
-    return { vars, where }
+    const [head, ...tail] = rule(vars)
+    return { vars, head, tail, popHead: (res) => rule(res)[0] }
 }
 
-function mapVars (vars, bindings) {
-    return Object.keys(vars).reduce((m, k) => {
-        m[k] = lookup(bindings, vars[k])
+function mapVars (zzz, bindings) {
+    return Object.keys(zzz.vars).reduce((m, k) => {
+        m[k] = lookup(bindings, zzz.vars[k])
         return m
     }, {})
 }
 
-function * getRuleBindings (initBindings, rule, w, db) {
-    const { where: [clauseRule, ...clauseConditions], vars: clauseVars } = runClause(rule)
+function * getRuleBindings (db, initBindings, w, rule) {
+    const zzz = parseRule(rule)
     let bindings = initBindings
     // if rule matches where pattern
-    for (let i = 0; i < w.length; i++) {
-        bindings = unify(bindings, w[i], clauseRule[i])
+    for (let i = 0; i < w.head.length; i++) {
+        bindings = unify(bindings, w.head[i], zzz.head[i])
         if (!bindings) { return }
     }
-    for (const res of innerQuery(bindings, db, clauseVars, clauseConditions)) {
-        const fact = rule(res)[0]
-        const nextBindings = [...getFactBindings(bindings, fact, w)][0]
-        if (nextBindings) { yield nextBindings }
+    // simple fact
+    if (!zzz.tail.length) {
+        yield bindings
+        return
+    }
+
+    for (const res of innerQuery(db, bindings, nextZZZ(zzz))) {
+        yield * getRuleBindings(db, bindings, w, zzz.popHead(res))
     }
 }
 
@@ -79,15 +88,6 @@ function unify (bindings, lhs, rhs) {
     return null
 }
 
-function * getFactBindings (initBindings, fact, where) {
-    let bindings = initBindings
-    for (let i = 0; i < where.length; i++) {
-        bindings = unify(bindings, where[i], fact[i])
-        if (!bindings) { return }
-    }
-    yield bindings
-}
-
 function createDatabase (tables) {
     const rules = []
     for (const tableName in tables) {
@@ -104,10 +104,6 @@ function createDatabase (tables) {
     return rules
 }
 
-function pull () {
-    // TODO
-}
-
 const r = new Proxy({}, {
     get: (_, name) => (id, ...params) => [id, name, ...params]
 })
@@ -115,6 +111,5 @@ const r = new Proxy({}, {
 module.exports = {
     query,
     createDatabase,
-    r,
-    pull
+    r
 }

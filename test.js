@@ -1,5 +1,5 @@
 const test = require('tape')
-const { query, createDatabase, pull, r } = require('./index')
+const { query, createDatabase, r } = require('./index')
 
 test('find a single match', (t) => {
     const db = [
@@ -152,32 +152,5 @@ test('recursion', (t) => {
 
     const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['charles1', 'james1'])
-    t.end()
-})
-
-test('pull', (t) => {
-    const db = createDatabase({
-        person: [
-            { id: 1, name: 'James I', male: true },
-            { id: 2, name: 'Charles I', male: true },
-            { id: 3, name: 'Charles II', male: true },
-            { id: 4, name: 'James II', male: true },
-            { id: 5, name: 'George I', male: true },
-            { id: 6, name: 'Catherine', female: true },
-            { id: 7, name: 'Elizabeth', female: true },
-            { id: 8, name: 'Sophia', female: true }
-        ],
-        parentChild: [
-            { id: 1, childID: 2 },
-            { id: 1, childID: 7 }
-        ]
-    })
-
-    const res = pull(db, 1, ['person/name', {'parentChild/id': ['person/name']}])
-    t.deepEquals(res, {
-        'person/name': 'James I',
-        'male': true,
-        'parentChild/id': [{'person/name': 'Charles I'}, {'person/name': 'Elizabeth'}]
-    })
     t.end()
 })
