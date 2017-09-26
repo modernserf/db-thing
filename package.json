@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "lint": "eslint .",
-    "test": "tape test2.js | faucet"
+    "test": "tape test.js | faucet"
   },
   "author": "Justin Falcone <justin@justinfalcone.com>",
   "license": "ISC",

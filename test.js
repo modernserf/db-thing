@@ -1,14 +1,14 @@
 const test = require('tape')
-const { query, createDatabase, r } = require('./index')
+const { run, createDB, r } = require('./index')
 
 test('find a single match', (t) => {
-    const db = [
+    const db = createDB([
         [1, 'name', 'Alice'],
         [2, 'name', 'Bob'],
         [3, 'name', 'Carol']
-    ]
+    ])
 
-    const res = query(db, ({ id }) => [
+    const res = run(db, ({ id }) => [
         [id, 'name', 'Alice']
     ])
 
@@ -18,15 +18,15 @@ test('find a single match', (t) => {
 })
 
 test('find multiple results', (t) => {
-    const db = [
+    const db = createDB([
         [1, 'name', 'Adam'],
         [2, 'name', 'Cain'],
         [3, 'name', 'Abel'],
         [1, 'father-of', 2],
         [1, 'father-of', 3]
-    ]
+    ])
 
-    const res = query(db, ({ childID }) => [
+    const res = run(db, ({ childID }) => [
         [1, 'father-of', childID]
     ])
 
@@ -36,15 +36,15 @@ test('find multiple results', (t) => {
 })
 
 test('find relationships', (t) => {
-    const db = [
+    const db = createDB([
         [1, 'name', 'Adam'],
         [2, 'name', 'Cain'],
         [3, 'name', 'Abel'],
         [1, 'father-of', 2],
         [1, 'father-of', 3]
-    ]
+    ])
 
-    const res = query(db, ({ parentID, childID, name }) => [
+    const res = run(db, ({ parentID, childID, name }) => [
         [parentID, 'name', 'Adam'],
         [childID, 'name', name],
         [parentID, 'father-of', childID]
@@ -55,41 +55,17 @@ test('find relationships', (t) => {
     t.end()
 })
 
-test('build a database with tables', (t) => {
-    const db = createDatabase({
-        person: [
-            { id: 1, name: 'Adam' },
-            { id: 2, name: 'Cain' },
-            { id: 3, name: 'Abel' }
-        ],
-        parentChild: [
-            { id: 1, childID: 2 },
-            { id: 1, childID: 3 }
-        ]
-    })
-
-    const res = query(db, ({parentID, childID, name}) => [
-        [parentID, 'person/name', 'Adam'],
-        [childID, 'person/name', name],
-        [parentID, 'parentChild/childID', childID]
-    ])
-
-    const names = [...res].map((p) => p.name).sort()
-    t.deepEquals(names, ['Abel', 'Cain'])
-    t.end()
-})
-
 test('rules', (t) => {
-    const db = [
-        r.male('james1'),
-        r.male('charles1'),
-        r.male('charles2'),
-        r.male('james2'),
-        r.male('george1'),
+    const db = createDB([
+        r.gender('james1', 'male'),
+        r.gender('charles1', 'male'),
+        r.gender('charles2', 'male'),
+        r.gender('james2', 'male'),
+        r.gender('george1', 'male'),
 
-        r.female('catherine'),
-        r.female('elizabeth'),
-        r.female('sophia'),
+        r.gender('catherine', 'female'),
+        r.gender('elizabeth', 'female'),
+        r.gender('sophia', 'female'),
 
         r.parent('charles1', 'james1'),
         r.parent('elizabeth', 'james1'),
@@ -101,12 +77,12 @@ test('rules', (t) => {
 
         ({ Child, Father }) => [
             r.father(Child, Father), // :-
-            r.male(Father),
+            r.gender(Father, 'male'),
             r.parent(Child, Father)
         ]
-    ]
+    ])
 
-    const res = query(db, ({ name }) => [
+    const res = run(db, ({ name }) => [
         r.father(name, 'charles1')
     ])
 
@@ -116,16 +92,16 @@ test('rules', (t) => {
 })
 
 test('recursion', (t) => {
-    const db = [
-        r.male('james1'),
-        r.male('charles1'),
-        r.male('charles2'),
-        r.male('james2'),
-        r.male('george1'),
+    const db = createDB([
+        r.gender('james1', 'male'),
+        r.gender('charles1', 'male'),
+        r.gender('charles2', 'male'),
+        r.gender('james2', 'male'),
+        r.gender('george1', 'male'),
 
-        r.female('catherine'),
-        r.female('elizabeth'),
-        r.female('sophia'),
+        r.gender('catherine', 'female'),
+        r.gender('elizabeth', 'female'),
+        r.gender('sophia', 'female'),
 
         r.parent('charles1', 'james1'),
         r.parent('elizabeth', 'james1'),
@@ -139,14 +115,14 @@ test('recursion', (t) => {
             r.ancestor(Child, Parent),
             r.parent(Child, Parent)
         ],
-        ({ Child, Parent, Ancestor }) => [
-            r.ancestor(Child, Ancestor),
-            r.parent(Parent, Ancestor),
-            r.ancestor(Child, Parent)
+        ({ Descendant, Middle, Ancestor }) => [
+            r.ancestor(Descendant, Ancestor),
+            r.parent(Middle, Ancestor),
+            r.ancestor(Descendant, Middle)
         ]
-    ]
+    ])
 
-    const res = query(db, ({ name }) => [
+    const res = run(db, ({ name }) => [
         r.ancestor('charles2', name)
     ])
 
