@@ -48,13 +48,21 @@ function mapVars (vars, bindings) {
 }
 
 function * innerQuery (db, bindings, [q, ...restQ]) {
-    for (const rule of searchSpace(db, q)) {
-        for (const nextBindings of rule.run(db, bindings, q)) {
-            if (restQ.length) {
-                yield * innerQuery(db, nextBindings, restQ)
-            } else {
-                yield nextBindings
-            }
+    for (const nextBindings of processRule(db, bindings, q)) {
+        if (restQ.length) {
+            yield * innerQuery(db, nextBindings, restQ)
+        } else {
+            yield nextBindings
+        }
+    }
+}
+
+function * processRule (db, bindings, row) {
+    if (row.run) {
+        yield * row.run(db, bindings)
+    } else {
+        for (const rule of searchSpace(db, row)) {
+            yield * rule.run(db, bindings, row)
         }
     }
 }
@@ -68,22 +76,10 @@ function genRule (ruleFn) {
     })
 
     const [head, ...body] = ruleFn(vars)
-    function * runRule (db, oldBindings, q, rows) {
-        const [row, ...restBody] = rows
-        for (const rule of searchSpace(db, row)) {
-            for (const nextBindings of rule.run(db, oldBindings, row)) {
-                if (restBody.length) {
-                    yield * runRule(db, nextBindings, q, restBody)
-                } else {
-                    yield nextBindings
-                }
-            }
-        }
-    }
 
     function * runOuter (db, bindings, q) {
         bindings = unify(bindings, q, head)
-        if (bindings) { yield * runRule(db, bindings, q, body) }
+        if (bindings) { yield * innerQuery(db, bindings, body) }
     }
 
     return {
@@ -111,6 +107,15 @@ function lookup (bindings, v) {
     return lookup(bindings, bindings[v])
 }
 
+function neq (lhs, rhs) {
+    return {
+        run: function * (_, bindings) {
+            bindings = _neq(bindings, lhs, rhs)
+            if (bindings) { yield bindings }
+        }
+    }
+}
+
 function unify (bindings, lhs, rhs) {
     lhs = lookup(bindings, lhs)
     rhs = lookup(bindings, rhs)
@@ -133,6 +138,27 @@ function unify (bindings, lhs, rhs) {
     return null
 }
 
+function _neq (bindings, lhs, rhs) {
+    lhs = lookup(bindings, lhs)
+    rhs = lookup(bindings, rhs)
+    console.log('NEQ')
+
+    if (lhs === rhs) { return null }
+
+    if (sym(lhs) || sym(rhs)) {
+        throw new Error('Arguments to `neq` must be fully instantiated')
+    }
+
+    if (Array.isArray(lhs) && Array.isArray(rhs) && lhs.length === rhs.length) {
+        for (let i = 0; i < lhs.length; i++) {
+            if (_neq(bindings, lhs[i], rhs[i])) { return bindings }
+        }
+        return null
+    }
+
+    return bindings
+}
+
 function searchSpace (db, q) {
     const limits = []
     const ln = Math.min(q.length, db.indices.length)
@@ -152,4 +178,4 @@ function logBindings (bindings) {
         .map((k) => [k, bindings[k]]))
 }
 
-module.exports = { createDB, run, r, logBindings }
+module.exports = { createDB, run, r, logBindings, neq }

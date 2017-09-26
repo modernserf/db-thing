@@ -1,5 +1,5 @@
 const test = require('tape')
-const { run, createDB, r } = require('./index')
+const { run, createDB, r, neq } = require('./index')
 
 test('find a single match', (t) => {
     const db = createDB([
@@ -128,5 +128,27 @@ test('recursion', (t) => {
 
     const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['charles1', 'james1'])
+    t.end()
+})
+
+test('inequality', (t) => {
+    const db = createDB([
+        r.color('shirt1', 'blue'),
+        r.color('pants1', 'red'),
+        r.color('pants2', 'blue'),
+        ({ A, B, AColor, BColor }) => [
+            r.complements(A, B),
+            r.color(A, AColor),
+            r.color(B, BColor),
+            neq(A, B)
+        ]
+    ])
+
+    const res = run(db, ({ pants }) => [
+        r.complements('shirt1', pants)
+    ])
+
+    const [{ pants }] = [...res]
+    t.equals(pants, 'pants1')
     t.end()
 })
