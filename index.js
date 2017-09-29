@@ -1,27 +1,18 @@
-const groupBy = require('lodash/groupBy')
-const intersection = require('lodash/intersection')
 const mapValues = require('lodash/mapValues')
 
 const r = new Proxy({}, {
     get: (_, name) => (id, ...params) => [id, name, ...params]
 })
 
-const FREE_VAR = Symbol('FREE VAR')
 const isFact = (x) => Array.isArray(x)
 const isRule = (x) => typeof x === 'function'
-const getGroup = (i) => (f) => sym(f.index[i]) ? FREE_VAR : f.index[i]
 
 function createDB (rawRules) {
     const rules = rawRules.map((r) =>
         isFact(r) ? genFact(r)
             : isRule(r) ? genRule(r)
                 : r)
-    const indices = [
-        groupBy(rules, getGroup(0)),
-        groupBy(rules, getGroup(1)),
-        groupBy(rules, getGroup(2))
-    ]
-    return { indices, rules }
+    return createIndex(rules)
 }
 
 function * run (db, rawQuery) {
@@ -159,18 +150,90 @@ function _neq (bindings, lhs, rhs) {
     return bindings
 }
 
-function searchSpace (db, q) {
-    const limits = []
-    const ln = Math.min(q.length, db.indices.length)
-    for (let i = 0; i < ln; i++) {
-        if (!sym(q[i])) {
-            const rows = db.indices[i][q[i]]
-                .concat(db.indices[i][FREE_VAR] || [])
-            limits.push(rows)
+function insert (map, id, key, value) {
+    if (!map.has(id)) { map.set(id, new Map()) }
+    if (!map.get(id).has(key)) { map.get(id).set(key, []) }
+    map.get(id).get(key).push(value)
+}
+
+function createIndex (db, schema = {}) {
+    const ids = new Map()
+    const joins = new Map()
+    const rules = new Map()
+    const rest = []
+    for (const row of db) {
+        const { index: [id, key, value] } = row
+        if (!sym(id) && !sym(key)) {
+            insert(ids, id, key, row)
+            if (schema[key] && schema[key].type === 'id') {
+                insert(joins, value, key, row)
+            }
+        } else {
+            if (!rules.has(key)) { rules.set(key, []) }
+            rules.get(key).push(row)
         }
     }
-    if (!limits.length) { return db.rules }
-    return intersection(...limits)
+    return { ids, joins, rules, rest, all: db, schema }
+}
+
+function * unwrap (map) {
+    for (const sublist of map.values()) {
+        yield * sublist
+    }
+}
+
+function * get (map, key, ...restKeys) {
+    if (map.has(key)) {
+        if (restKeys.length) {
+            yield * get(map.get(key), ...restKeys)
+        } else {
+            yield * map.get(key)
+        }
+    }
+}
+
+function * searchSpace (db, q) {
+    const [id, key, value] = q
+
+    // [a b c]
+    // [a b X]
+    if (!sym(id) && !sym(key)) {
+        yield * get(db.ids, id, key)
+        yield * get(db.rules, key)
+        return
+    }
+
+    // [a X Y]
+    // [a X b]
+    if (!sym(id) && sym(key)) {
+        yield * unwrap(db.ids.get(id))
+        yield * unwrap(db.rules)
+        return
+    }
+
+    // [X a Y]
+    if (sym(id) && !sym(key) && sym(value)) {
+        yield * db.rules.get(key) || []
+        for (const item of db.ids.values()) {
+            yield * get(item, key)
+        }
+        return
+    }
+
+    // [X a b]
+    if (sym(id) && !sym(key) && !sym(value)) {
+        yield * db.rules.get(key) || []
+        if (db.schema[key] && db.schema[key].type === 'id') {
+            yield * get(db, value, key)
+        } else {
+            for (const item of db.ids.values()) {
+                yield * get(item, key)
+            }
+        }
+        return
+    }
+
+    yield * db.all
 }
 
 function logBindings (bindings) {
