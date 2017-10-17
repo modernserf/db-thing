@@ -1,244 +1,201 @@
-const mapValues = require('lodash/mapValues')
+const _value = Symbol('_value')
+// const _rest = Symbol('_rest')
 
-const r = new Proxy({}, {
-    get: (_, name) => (id, ...params) => [id, name, ...params]
-})
-
-const isFact = (x) => Array.isArray(x)
-const isRule = (x) => typeof x === 'function'
-
-function createDB (rawRules) {
-    const rules = rawRules.map((r) =>
-        isFact(r) ? genFact(r)
-            : isRule(r) ? genRule(r)
-                : r)
-    return createIndex(rules)
-}
-
-function * run (db, rawQuery) {
-    const initBindings = {}
-    const { vars, query } = initQuery(rawQuery)
-    for (const bindings of innerQuery(db, initBindings, query)) {
-        yield mapVars(vars, bindings)
+class DB {
+    constructor (...data) {
+        this.rules = [].concat(...data.map((d) => [...createRules(d)]))
     }
-}
-
-function initQuery (rawQuery) {
-    const vars = new Proxy({}, {
-        get: (target, name) => {
-            if (!target[name]) { target[name] = Symbol(name) }
-            return target[name]
+    * query (queryFunc) {
+        const { query, vars } = buildQueryMap(queryFunc)
+        for (const endState of this._run(query)) {
+            const result = getResult(endState, vars)
+            if (result) { yield result }
         }
-    })
-    const query = rawQuery(vars)
-    return { vars, query }
-}
-
-function mapVars (vars, bindings) {
-    return mapValues(vars, (symbol) => lookup(bindings, symbol))
-}
-
-function * innerQuery (db, bindings, [q, ...restQ]) {
-    for (const nextBindings of processRule(db, bindings, q)) {
-        if (restQ.length) {
-            yield * innerQuery(db, nextBindings, restQ)
+    }
+    insert (data) {
+        const id = String(Date.now())
+        this.rules.push(...createRules({ [id]: data }))
+    }
+    where (params) {
+        const qf = (q) =>
+            Object.entries(params).map(([key, value]) => [q.id, key, value])
+        return [...this.query(qf)].map(r => r.id)
+    }
+    find (id, key, defaultValue = null) {
+        const q = this.query(p => [[String(id), key, p.value]])
+        const { value, done } = q.next()
+        return done ? defaultValue : value.value
+    }
+    findAll (id, key) {
+        const q = this.query(p => [[String(id), key, p.value]])
+        return [...q].map(r => r.value)
+    }
+    pull (id, keys) {
+        return keys.reduce((m, key) => {
+            if (typeof key === 'object') {
+                for (const [childRel, childKeys] of Object.entries(key)) {
+                    const childIDs = this.findAll(id, childRel)
+                    m[childRel] = childIDs.map(cid => this.pull(cid, childKeys))
+                }
+            } else if ((this.schema[key] || {}).many) {
+                m[key] = this.findAll(id, key)
+            } else {
+                m[key] = this.find(id, key)
+            }
+            return m
+        }, {})
+    }
+    * _run ([query, ...restQueries], state = {}) {
+        for (let nextState of this._matchRules(query, state)) {
+            this._log('match', query, nextState)
+            if (restQueries.length) {
+                yield * this._run(restQueries, nextState)
+            } else {
+                yield nextState
+            }
+        }
+    }
+    * _matchRules (query, state) {
+        if (query.runQuery) {
+            yield * query.runQuery(this, state)
         } else {
-            yield nextBindings
+            for (let rule of this.rules) {
+                yield * rule.run(this, query, state)
+            }
+        }
+    }
+    _log (...args) {
+        if (this.trace) {
+            console.log(...args)
         }
     }
 }
 
-function * processRule (db, bindings, row) {
-    if (row.run) {
-        yield * row.run(db, bindings)
-    } else {
-        for (const rule of searchSpace(db, row)) {
-            yield * rule.run(db, bindings, row)
-        }
-    }
+function val (x) { return x[_value] || x }
+function sym (x) { return typeof x === 'symbol' }
+function set (state, k, v) { return Object.assign({}, state, { [k]: v }) }
+function lookup (state, v) {
+    if (sym(v) && state[v]) { return lookup(state, state[v]) }
+    return v
 }
-
-function genRule (ruleFn) {
-    const vars = new Proxy({}, {
-        get: (target, name) => {
-            if (!target[name]) { target[name] = Symbol(name) }
-            return target[name]
-        }
-    })
-
-    const [head, ...body] = ruleFn(vars)
-
-    function * runOuter (db, bindings, q) {
-        bindings = unify(bindings, q, head)
-        if (bindings) { yield * innerQuery(db, bindings, body) }
-    }
-
-    return {
-        index: head,
-        run: runOuter
-    }
-}
-
-function genFact (rdf) {
-    return {
-        index: rdf,
-        run: function * (_, prevBindings, q) {
-            const bindings = unify(prevBindings, q, rdf)
-            if (bindings) { yield bindings }
-        }
-    }
-}
-
-function sym (v) { return typeof v === 'symbol' }
-function set (l, k, v) { return Object.assign({}, l, { [k]: v }) }
-
-// recursively trace bindings
-function lookup (bindings, v) {
-    if (!sym(v) || !bindings[v]) { return v }
-    return lookup(bindings, bindings[v])
-}
-
-function neq (lhs, rhs) {
-    return {
-        run: function * (_, bindings) {
-            bindings = _neq(bindings, lhs, rhs)
-            if (bindings) { yield bindings }
-        }
-    }
-}
-
-function unify (bindings, lhs, rhs) {
-    lhs = lookup(bindings, lhs)
-    rhs = lookup(bindings, rhs)
+function unify (state, lhs, rhs) {
+    lhs = lookup(state, lhs)
+    rhs = lookup(state, rhs)
 
     // literal equality
-    if (lhs === rhs) { return bindings }
+    if (lhs === rhs) { return state }
     // new binding
-    if (sym(lhs)) { return set(bindings, lhs, rhs) }
-    if (sym(rhs)) { return set(bindings, rhs, lhs) }
+    if (sym(lhs)) { return set(state, lhs, rhs) }
+    if (sym(rhs)) { return set(state, rhs, lhs) }
     // array
     if (Array.isArray(lhs) && Array.isArray(rhs) && lhs.length === rhs.length) {
-        for (let i = 0; i < lhs.length; i++) {
-            bindings = unify(bindings, lhs[i], rhs[i])
-            if (!bindings) { return null }
-        }
-        return bindings
-    }
+        const [l, ..._lhs] = lhs
+        const [r, ..._rhs] = rhs
+        const nextState = unify(state, l, r)
+        if (!nextState) { return null }
 
+        if (_lhs.length) {
+            return unify(nextState, _lhs, _rhs)
+        } else {
+            return nextState
+        }
+    }
     // mismatch
     return null
 }
-
-function _neq (bindings, lhs, rhs) {
-    lhs = lookup(bindings, lhs)
-    rhs = lookup(bindings, rhs)
-    console.log('NEQ')
-
-    if (lhs === rhs) { return null }
-
-    if (sym(lhs) || sym(rhs)) {
-        throw new Error('Arguments to `neq` must be fully instantiated')
-    }
-
-    if (Array.isArray(lhs) && Array.isArray(rhs) && lhs.length === rhs.length) {
-        for (let i = 0; i < lhs.length; i++) {
-            if (_neq(bindings, lhs[i], rhs[i])) { return bindings }
+function getResult (state, vars) {
+    if (!state) { return null }
+    return Object.keys(vars).reduce((m, v) => {
+        const val = lookup(state, vars[v])
+        if (!sym(val)) { m[v] = val }
+        return m
+    }, {})
+}
+function createVarBuilder (name, sym) {
+    function varBuilder (id, ...params) {
+        const arr = [id, name, ...params]
+        arr.if = function (...rules) {
+            return [arr].concat(rules)
         }
-        return null
+        return arr
     }
-
-    return bindings
+    // varBuilder[Symbol.iterator] = function * () {
+    //     yield { [_rest]: sym }
+    // }
+    varBuilder[_value] = sym
+    return varBuilder
 }
-
-function insert (map, id, key, value) {
-    if (!map.has(id)) { map.set(id, new Map()) }
-    if (!map.get(id).has(key)) { map.get(id).set(key, []) }
-    map.get(id).get(key).push(value)
-}
-
-function createIndex (db, schema = {}) {
-    const ids = new Map()
-    const joins = new Map()
-    const rules = new Map()
-    const rest = []
-    for (const row of db) {
-        const { index: [id, key, value] } = row
-        if (!sym(id) && !sym(key)) {
-            insert(ids, id, key, row)
-            if (schema[key] && schema[key].type === 'id') {
-                insert(joins, value, key, row)
+function buildQueryMap (queryFunc) {
+    const vars = {}
+    const q = new Proxy({}, {
+        get: (target, name) => {
+            if (!target[name]) {
+                const sym = Symbol(name)
+                target[name] = createVarBuilder(name, sym)
+                vars[name] = sym
             }
-        } else {
-            if (!rules.has(key)) { rules.set(key, []) }
-            rules.get(key).push(row)
+            return target[name]
         }
-    }
-    return { ids, joins, rules, rest, all: db, schema }
-}
+    })
 
-function * unwrap (map) {
-    for (const sublist of map.values()) {
-        yield * sublist
-    }
+    const query = queryFunc(q).map((rule) =>
+        Array.isArray(rule) ? rule.map((x) => val(x)) : rule)
+    return { vars, query }
 }
-
-function * get (map, key, ...restKeys) {
-    if (map.has(key)) {
-        if (restKeys.length) {
-            yield * get(map.get(key), ...restKeys)
-        } else {
-            yield * map.get(key)
+function createRule (fn) {
+    const [head, ...body] = buildQueryMap(fn).query
+    return {
+        index: head,
+        run: function * (db, query, state) {
+            db._log('rule', head, state)
+            const nextState = unify(state, head, query)
+            if (nextState) { yield * db._run(body, nextState) }
         }
     }
 }
-
-function * searchSpace (db, q) {
-    const [id, key, value] = q
-
-    // [a b c]
-    // [a b X]
-    if (!sym(id) && !sym(key)) {
-        yield * get(db.ids, id, key)
-        yield * get(db.rules, key)
-        return
-    }
-
-    // [a X Y]
-    // [a X b]
-    if (!sym(id) && sym(key)) {
-        yield * unwrap(db.ids.get(id))
-        yield * unwrap(db.rules)
-        return
-    }
-
-    // [X a Y]
-    if (sym(id) && !sym(key) && sym(value)) {
-        yield * db.rules.get(key) || []
-        for (const item of db.ids.values()) {
-            yield * get(item, key)
+function createFact (fact) {
+    return {
+        index: fact,
+        run: function * (db, query, state) {
+            db._log('fact', fact, state)
+            const nextState = unify(state, fact, query)
+            if (nextState) { yield nextState }
         }
-        return
     }
-
-    // [X a b]
-    if (sym(id) && !sym(key) && !sym(value)) {
-        yield * db.rules.get(key) || []
-        if (db.schema[key] && db.schema[key].type === 'id') {
-            yield * get(db, value, key)
-        } else {
-            for (const item of db.ids.values()) {
-                yield * get(item, key)
+}
+function * createRules (data) {
+    if (Array.isArray(data)) {
+        yield createFact(data)
+    } else if (typeof data === 'function') {
+        yield createRule(data)
+    } else {
+        for (const [id, entry] of Object.entries(data)) {
+            for (const [key, value] of Object.entries(entry)) {
+                if (Array.isArray(value)) {
+                    yield * value.map((v) => createFact([id, key, v]))
+                } else {
+                    yield createFact([id, key, value])
+                }
             }
         }
-        return
     }
-
-    yield * db.all
 }
 
-function logBindings (bindings) {
-    console.log(Object.getOwnPropertySymbols(bindings)
-        .map((k) => [k, bindings[k]]))
+DB.assert = function (...vars) {
+    const f = vars.pop()
+    return {
+        runQuery: function * (self, state) {
+            self._log('runQuery', vars)
+            const args = vars.map((v) => {
+                const value = lookup(state, val(v))
+                if (sym(value)) {
+                    throw new Error('Arguments to `DB.assert` must be fully instantiated')
+                }
+                return value
+            })
+            if (f(...args)) { yield state }
+        }
+    }
 }
 
-module.exports = { createDB, run, r, logBindings, neq }
+module.exports = DB

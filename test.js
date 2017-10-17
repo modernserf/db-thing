@@ -1,154 +1,187 @@
 const test = require('tape')
-const { run, createDB, r, neq } = require('./index')
+const DB = require('./index')
 
-test('find a single match', (t) => {
-    const db = createDB([
-        [1, 'name', 'Alice'],
-        [2, 'name', 'Bob'],
-        [3, 'name', 'Carol']
-    ])
-
-    const res = run(db, ({ id }) => [
-        [id, 'name', 'Alice']
-    ])
-
-    const [{id}] = [...res]
-    t.equals(id, 1)
+test('find in db', (t) => {
+    const db = new DB({
+        1: { name: 'Alice' },
+        2: { name: 'Bob' },
+        3: { name: 'Carol' }
+    })
+    t.equals(db.find(1, 'name'), 'Alice')
+    t.equals(db.find('2', 'name'), 'Bob')
+    t.equals(db.find(100, 'name'), null)
     t.end()
 })
 
-test('find multiple results', (t) => {
-    const db = createDB([
-        [1, 'name', 'Adam'],
-        [2, 'name', 'Cain'],
-        [3, 'name', 'Abel'],
-        [1, 'father-of', 2],
-        [1, 'father-of', 3]
-    ])
+test('findAll', (t) => {
+    const db = new DB({
+        adam: {
+            name: 'Adam',
+            father_of: ['cain', 'abel']
+        },
+        cain: { name: 'Cain' },
+        abel: { name: 'Abel' }
+    })
 
-    const res = run(db, ({ childID }) => [
-        [1, 'father-of', childID]
-    ])
-
-    const ids = [...res].map((p) => p.childID).sort()
-    t.deepEquals(ids, [2, 3])
+    t.deepEquals(db.findAll('adam', 'father_of'), ['cain', 'abel'])
     t.end()
 })
 
-test('find relationships', (t) => {
-    const db = createDB([
-        [1, 'name', 'Adam'],
-        [2, 'name', 'Cain'],
-        [3, 'name', 'Abel'],
-        [1, 'father-of', 2],
-        [1, 'father-of', 3]
-    ])
+test('where', (t) => {
+    const db = new DB({
+        adam: {
+            name: 'Adam',
+            father_of: ['cain', 'abel']
+        },
+        cain: { name: 'Cain' },
+        abel: { name: 'Abel' }
+    })
 
-    const res = run(db, ({ parentID, childID, name }) => [
-        [parentID, 'name', 'Adam'],
-        [childID, 'name', name],
-        [parentID, 'father-of', childID]
-    ])
+    t.deepEquals(db.where({ father_of: 'cain' }), ['adam'])
+    t.end()
+})
 
+test('pull', (t) => {
+    const db = new DB({
+        adam: {
+            name: 'Adam',
+            father_of: ['cain', 'abel']
+        },
+        cain: { name: 'Cain' },
+        abel: { name: 'Abel' }
+    })
+    db.schema = {
+        father_of: { many: true }
+    }
+
+    t.deepEquals(
+        db.pull('adam', ['name', {father_of: ['name']}]),
+        { name: 'Adam', father_of: [{name: 'Cain'}, {name: 'Abel'}] })
+    t.end()
+})
+
+test('query, relationships', (t) => {
+    const db = new DB({
+        adam: {
+            name: 'Adam',
+            father_of: ['cain', 'abel']
+        },
+        cain: { name: 'Cain' },
+        abel: { name: 'Abel' }
+    })
+
+    const res = db.query((q) => [
+        [q.parentID, 'name', 'Adam'],
+        [q.childID, 'name', q.name],
+        [q.parentID, 'father_of', q.childID]
+    ])
+    const names = [...res].map((p) => p.name).sort()
+    t.deepEquals(names, ['Abel', 'Cain'])
+    t.end()
+})
+
+test('query, prolog syntax', (t) => {
+    const db = new DB({
+        adam: {
+            name: 'Adam',
+            father_of: ['cain', 'abel']
+        },
+        cain: { name: 'Cain' },
+        abel: { name: 'Abel' }
+    })
+
+    const res = db.query((q) => [
+        q.name(q.parentID, 'Adam'),
+        q.name(q.childID, q.name),
+        q.father_of(q.parentID, q.childID)
+    ])
     const names = [...res].map((p) => p.name).sort()
     t.deepEquals(names, ['Abel', 'Cain'])
     t.end()
 })
 
 test('rules', (t) => {
-    const db = createDB([
-        r.gender('james1', 'male'),
-        r.gender('charles1', 'male'),
-        r.gender('charles2', 'male'),
-        r.gender('james2', 'male'),
-        r.gender('george1', 'male'),
+    const db = new DB({
+        james1: {
+            gender: 'male',
+            children: ['charles1', 'elizabeth']
+        },
+        charles1: {
+            gender: 'male',
+            children: ['charles2', 'catherine', 'james2']
+        },
+        elizabeth: {
+            gender: 'female',
+            children: ['sophia']
+        },
+        charles2: { gender: 'male' },
+        catherine: { gender: 'female' },
+        james2: { gender: 'male' },
+        sophia: {
+            gender: 'female',
+            children: ['george1']
+        },
+        george1: { gender: 'male' }
+    },
+    (q) => q.father_of(q.father, q.child).if(
+        q.gender(q.father, 'male'),
+        q.children(q.father, q.child))
+    )
 
-        r.gender('catherine', 'female'),
-        r.gender('elizabeth', 'female'),
-        r.gender('sophia', 'female'),
-
-        r.parent('charles1', 'james1'),
-        r.parent('elizabeth', 'james1'),
-        r.parent('charles2', 'charles1'),
-        r.parent('catherine', 'charles1'),
-        r.parent('james2', 'charles1'),
-        r.parent('sophia', 'elizabeth'),
-        r.parent('george1', 'sophia'),
-
-        ({ Child, Father }) => [
-            r.father(Child, Father), // :-
-            r.gender(Father, 'male'),
-            r.parent(Child, Father)
-        ]
-    ])
-
-    const res = run(db, ({ name }) => [
-        r.father(name, 'charles1')
-    ])
-
-    const names = [...res].map((p) => p.name).sort()
-    t.deepEquals(names, ['catherine', 'charles2', 'james2'])
+    t.deepEquals(
+        db.where({ father_of: 'charles1' }),
+        ['james1'])
     t.end()
 })
 
 test('recursion', (t) => {
-    const db = createDB([
-        r.gender('james1', 'male'),
-        r.gender('charles1', 'male'),
-        r.gender('charles2', 'male'),
-        r.gender('james2', 'male'),
-        r.gender('george1', 'male'),
+    const db = new DB({
+        james1: {
+            gender: 'male',
+            children: ['charles1', 'elizabeth']
+        },
+        charles1: {
+            gender: 'male',
+            children: ['charles2', 'catherine', 'james2']
+        },
+        elizabeth: {
+            gender: 'female',
+            children: ['sophia']
+        },
+        charles2: { gender: 'male' },
+        catherine: { gender: 'female' },
+        james2: { gender: 'male' },
+        sophia: {
+            gender: 'female',
+            children: ['george1']
+        },
+        george1: { gender: 'male' }
+    },
+    (q) => q.ancestor_of(q.parent, q.child).if(
+        q.children(q.parent, q.child)),
+    (q) => q.ancestor_of(q.ancestor, q.descendant).if(
+        q.children(q.ancestor, q.middle),
+        q.ancestor_of(q.middle, q.descendant))
+    )
 
-        r.gender('catherine', 'female'),
-        r.gender('elizabeth', 'female'),
-        r.gender('sophia', 'female'),
-
-        r.parent('charles1', 'james1'),
-        r.parent('elizabeth', 'james1'),
-        r.parent('charles2', 'charles1'),
-        r.parent('catherine', 'charles1'),
-        r.parent('james2', 'charles1'),
-        r.parent('sophia', 'elizabeth'),
-        r.parent('george1', 'sophia'),
-
-        ({ Child, Parent }) => [
-            r.ancestor(Child, Parent),
-            r.parent(Child, Parent)
-        ],
-        ({ Descendant, Middle, Ancestor }) => [
-            r.ancestor(Descendant, Ancestor),
-            r.parent(Middle, Ancestor),
-            r.ancestor(Descendant, Middle)
-        ]
-    ])
-
-    const res = run(db, ({ name }) => [
-        r.ancestor('charles2', name)
-    ])
-
-    const names = [...res].map((p) => p.name).sort()
-    t.deepEquals(names, ['charles1', 'james1'])
+    t.deepEquals(
+        db.where({ ancestor_of: 'charles2' }).sort(),
+        ['charles1', 'james1'])
     t.end()
 })
 
-test('inequality', (t) => {
-    const db = createDB([
-        r.color('shirt1', 'blue'),
-        r.color('pants1', 'red'),
-        r.color('pants2', 'blue'),
-        ({ A, B, AColor, BColor }) => [
-            r.complements(A, B),
-            r.color(A, AColor),
-            r.color(B, BColor),
-            neq(A, B)
-        ]
-    ])
+test('DB.eval', (t) => {
+    const db = new DB({
+        shirt1: { color: 'blue' },
+        pants1: { color: 'red' },
+        pants2: { color: 'blue' }
+    },
+    (q) => q.complements(q.a, q.b).if(
+        q.color(q.a, q.a_color),
+        q.color(q.b, q.b_color),
+        DB.assert(q.a_color, q.b_color, (l, r) => l !== r)
+    ))
 
-    const res = run(db, ({ pants }) => [
-        r.complements('shirt1', pants)
-    ])
-
-    const [{ pants }] = [...res]
-    t.equals(pants, 'pants1')
+    t.equals(db.find('shirt1', 'complements'), 'pants1')
     t.end()
 })
