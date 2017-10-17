@@ -5,6 +5,27 @@ class DB {
     constructor (...data) {
         this.rules = [].concat(...data.map((d) => [...createRules(d)]))
     }
+    static withSchema (schema, ...rulesets) {
+        const db = new DB(...rulesets)
+        db.schema = schema
+        return db
+    }
+    static assert (...vars) {
+        const f = vars.pop()
+        return {
+            runQuery: function * (self, state) {
+                self._log('runQuery', vars)
+                const args = vars.map((v) => {
+                    const value = lookup(state, val(v))
+                    if (sym(value)) {
+                        throw new Error('Arguments to `DB.assert` must be fully instantiated')
+                    }
+                    return value
+                })
+                if (f(...args)) { yield state }
+            }
+        }
+    }
     * query (queryFunc) {
         const { query, vars } = buildQueryMap(queryFunc)
         for (const endState of this._run(query)) {
@@ -177,23 +198,6 @@ function * createRules (data) {
                     yield createFact([id, key, value])
                 }
             }
-        }
-    }
-}
-
-DB.assert = function (...vars) {
-    const f = vars.pop()
-    return {
-        runQuery: function * (self, state) {
-            self._log('runQuery', vars)
-            const args = vars.map((v) => {
-                const value = lookup(state, val(v))
-                if (sym(value)) {
-                    throw new Error('Arguments to `DB.assert` must be fully instantiated')
-                }
-                return value
-            })
-            if (f(...args)) { yield state }
         }
     }
 }

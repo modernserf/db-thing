@@ -42,7 +42,9 @@ test('where', (t) => {
 })
 
 test('pull', (t) => {
-    const db = new DB({
+    const db = DB.withSchema({
+        father_of: { many: true }
+    }, {
         adam: {
             name: 'Adam',
             father_of: ['cain', 'abel']
@@ -50,9 +52,6 @@ test('pull', (t) => {
         cain: { name: 'Cain' },
         abel: { name: 'Abel' }
     })
-    db.schema = {
-        father_of: { many: true }
-    }
 
     t.deepEquals(
         db.pull('adam', ['name', {father_of: ['name']}]),
