@@ -1,5 +1,5 @@
 const _value = Symbol('_value')
-// const _rest = Symbol('_rest')
+const _rest = Symbol('_rest')
 
 class DB {
     constructor (...data) {
@@ -67,13 +67,10 @@ class DB {
         }, {})
     }
     * _run ([query, ...restQueries], state = {}) {
+        if (!query) { yield state; return }
         for (let nextState of this._matchRules(query, state)) {
             this._log('match', query, nextState)
-            if (restQueries.length) {
-                yield * this._run(restQueries, nextState)
-            } else {
-                yield nextState
-            }
+            yield * this._run(restQueries, nextState)
         }
     }
     * _matchRules (query, state) {
@@ -93,6 +90,7 @@ class DB {
 }
 
 function val (x) { return x[_value] || x }
+function rest (x) { return x[_rest] }
 function sym (x) { return typeof x === 'symbol' }
 function set (state, k, v) { return Object.assign({}, state, { [k]: v }) }
 function lookup (state, v) {
@@ -109,9 +107,19 @@ function unify (state, lhs, rhs) {
     if (sym(lhs)) { return set(state, lhs, rhs) }
     if (sym(rhs)) { return set(state, rhs, lhs) }
     // array
-    if (Array.isArray(lhs) && Array.isArray(rhs) && lhs.length === rhs.length) {
+    if (Array.isArray(lhs) && Array.isArray(rhs)) {
         const [l, ..._lhs] = lhs
         const [r, ..._rhs] = rhs
+        // FIXME: this gets stuck in a loop
+        if (l && rest(l)) {
+            console.log('unify', rest(l), rhs, state)
+            return unify(state, rest(l), rhs)
+        }
+        if (r && rest(r)) {
+            console.log('unify', lhs, rest(r), state)
+            return unify(state, rest(r), lhs)
+        }
+
         const nextState = unify(state, l, r)
         if (!nextState) { return null }
 
@@ -140,9 +148,9 @@ function createVarBuilder (name, sym) {
         }
         return arr
     }
-    // varBuilder[Symbol.iterator] = function * () {
-    //     yield { [_rest]: sym }
-    // }
+    varBuilder[Symbol.iterator] = function * () {
+        yield { [_rest]: sym }
+    }
     varBuilder[_value] = sym
     return varBuilder
 }
@@ -160,7 +168,10 @@ function buildQueryMap (queryFunc) {
     })
 
     const query = queryFunc(q).map((rule) =>
-        Array.isArray(rule) ? rule.map((x) => val(x)) : rule)
+        Array.isArray(rule)
+            ? rule.map((x) =>
+                Array.isArray(x) ? x.map(val) : val(x))
+            : rule)
     return { vars, query }
 }
 function createRule (fn) {
@@ -168,7 +179,7 @@ function createRule (fn) {
     return {
         index: head,
         run: function * (db, query, state) {
-            db._log('rule', head, state)
+            db._log('rule', head, state, 'query', query)
             const nextState = unify(state, head, query)
             if (nextState) { yield * db._run(body, nextState) }
         }
