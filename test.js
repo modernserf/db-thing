@@ -196,19 +196,19 @@ test('always', (t) => {
 test('append', (t) => {
     const db = new DB(
         (q) => q.append([], q.L, q.L).if(),
-        (q) => q.append([q.H, ...q.X], q.Y, [q.H, ...q.XY]).if(
+        (q) => q.append([q.H, q.X], q.Y, [q.H, q.XY]).if(
             q.append(q.X, q.Y, q.XY))
     )
     const res1 = db.query((q) => [
-        q.append([], [4, 5], q.value)
+        q.append([], [4, [5, []]], q.value)
     ])
-    t.deepEquals([...res1], [{ value: [4, 5] }])
+    t.deepEquals([...res1], [{ value: [4, [5, []]] }])
 
     db.trace = true
 
     const res2 = db.query((q) => [
-        q.append([1, 2, 3], [4, 5], q.value)
+        q.append([1, []], [2, []], q.value)
     ])
-    t.deepEquals([...res2], [{ value: [1, 2, 3, 4, 5] }])
+    t.deepEquals([...res2], [{ value: [1, [2, []]] }])
     t.end()
 })

@@ -90,14 +90,16 @@ class DB {
 }
 
 function val (x) { return x[_value] || x }
-function rest (x) { return x[_rest] }
+// function rest (x) { return x[_rest] }
 function sym (x) { return typeof x === 'symbol' }
 function set (state, k, v) { return Object.assign({}, state, { [k]: v }) }
 function lookup (state, v) {
     if (sym(v) && state[v]) { return lookup(state, state[v]) }
+    if (Array.isArray(v)) { return v.map((x) => lookup(state, x)) }
     return v
 }
 function unify (state, lhs, rhs) {
+    // console.log('unify', lhs, rhs)
     lhs = lookup(state, lhs)
     rhs = lookup(state, rhs)
 
@@ -108,26 +110,15 @@ function unify (state, lhs, rhs) {
     if (sym(rhs)) { return set(state, rhs, lhs) }
     // array
     if (Array.isArray(lhs) && Array.isArray(rhs)) {
+        if (!lhs.length && !rhs.length) { return state }
+        if (!lhs.length || !rhs.length) { return null }
+
         const [l, ..._lhs] = lhs
         const [r, ..._rhs] = rhs
-        // FIXME: this gets stuck in a loop
-        if (l && rest(l)) {
-            console.log('unify', rest(l), rhs, state)
-            return unify(state, rest(l), rhs)
-        }
-        if (r && rest(r)) {
-            console.log('unify', lhs, rest(r), state)
-            return unify(state, rest(r), lhs)
-        }
 
         const nextState = unify(state, l, r)
         if (!nextState) { return null }
-
-        if (_lhs.length) {
-            return unify(nextState, _lhs, _rhs)
-        } else {
-            return nextState
-        }
+        return unify(nextState, _lhs, _rhs)
     }
     // mismatch
     return null
@@ -179,7 +170,7 @@ function createRule (fn) {
     return {
         index: head,
         run: function * (db, query, state) {
-            db._log('rule', head, state, 'query', query)
+            db._log('rule', head, state, '\nquery', query)
             const nextState = unify(state, head, query)
             if (nextState) { yield * db._run(body, nextState) }
         }
